@@ -1,0 +1,26 @@
+When i was trying to trigger glue job from lambda, i was getting concurrent executions related error in the glue job.
+Also counts in the source i.e. S3 was not matching the redshift count - more records get loaded into Redshift.
+Job bookmark is not available for Python based Glue job. Bookmark seemed to be available when Trigger was used on top of the Glue job but that didnt work as expected.
+Basically i was finding it diffcult to manage the number of executions of lambda, glue and struggling to make sure the source count and target count were equal.
+
+So i changed the design from real time loading into Redshift to 2 hops:
+In the first hop, the files processed by kinesis firehose will be moved to a staging area immediately. 
+While the landing area is dynamic, the staging area will be static making the copy command easier.
+
+In the second hop, a Glue Trigger that runs every hour will start a Glue job that processes all the files in Staging area into Redshift.
+The Glue job will make an audit entry into dynamodb table to keep track of file processed.
+The Glue job will also delete the files processed, from the Staging area so that they dont get processed again.
+
+The Glue job was timing out when loading into DynamoDB.
+The Glue job was running in a VPC and this could have been the reason .. it was not able to access the DynamoDB that was outside the VPC.
+I created a VPC end-point for DynamoDB in the same VPC in which the Glue job is running. The timeout issue got resolved.
+Similarly I created a VPC end-point for SecretsManager in the same VPC in which the Glue job is running.
+The VPC endpoint for S3 was already there.
+Make sure the IAM role of the Glue job has access to the required S3 bucket, SecretsManager secret, DynamoDB and redshift tables.  Else you will face permission denied issue.
+
+Make sure the Security Group associated with the Redshift cluster allows Redshift Traffic (port 5439) from the Security group associated with the Glue job.
+
+I faced the below error:
+JobName:my_order_logs_s3_to_redshift and JobRunId:jr_8d4eba44b104778866c2bb69de9044b3e46f2593fa839ffe03ef37525594bceb_attempt_1 failed to execute with exception At least one security group must open all ingress ports.To limit traffic, the source security group in your inbound rule can be restricted to the same security group (Service: AWSGlueJobExecutor; Status Code: 400; Error Code: InvalidInputException; Request ID: 32ab2ed4-a9e6-426b-ba13-9a4d5a960b38; Proxy: null)
+
+For this, i added a "All Traffic" Type Inbound Rule in the Security Group of the Redshift Cluster.
